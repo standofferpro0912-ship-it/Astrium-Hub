@@ -1715,6 +1715,16 @@ local function ESPCreateEntry(player)
     },root)
     Corner(headDot,20)
     Outline(headDot,Color3.new(1,1,1),1,.25)
+    local displayLabel=ESPText(root,"DisplayNameScreen",30,12)
+    displayLabel.AnchorPoint=Vector2.new(.5,1)
+    displayLabel.Size=UDim2.fromOffset(220,20)
+    displayLabel.TextWrapped=false
+    displayLabel.Visible=false
+    local usernameLabel=ESPText(root,"UsernameScreen",30,9)
+    usernameLabel.AnchorPoint=Vector2.new(.5,1)
+    usernameLabel.Size=UDim2.fromOffset(220,16)
+    usernameLabel.TextWrapped=false
+    usernameLabel.Visible=false
     local arrow=ESPNew("TextLabel",{
         Name="OffscreenArrow",AnchorPoint=Vector2.new(.5,.5),BackgroundTransparency=1,
         Text="▲",TextColor3=C.Accent,TextStrokeColor3=Color3.new(0,0,0),
@@ -1734,7 +1744,8 @@ local function ESPCreateEntry(player)
     local entry={
         player=player,root=root,boxGlowLines=boxGlowLines,boxLines=boxLines,
         cornerGlowLines=cornerGlowLines,cornerLines=cornerLines,
-        tracer=tracer,snapline=snapline,lookLine=lookLine,headDot=headDot,arrow=arrow,
+        tracer=tracer,snapline=snapline,lookLine=lookLine,headDot=headDot,
+        displayLabel=displayLabel,usernameLabel=usernameLabel,arrow=arrow,
         skeleton=skeleton,highlight=highlight,character=nil,billboard=nil,
     }
     ESPEntries[player]=entry
@@ -1753,6 +1764,8 @@ local function ESPHideEntry(entry)
     entry.snapline.Visible=false
     entry.lookLine.Visible=false
     entry.headDot.Visible=false
+    if entry.displayLabel then entry.displayLabel.Visible=false end
+    if entry.usernameLabel then entry.usernameLabel.Visible=false end
     entry.arrow.Visible=false
     entry.highlight.Enabled=false
     ESPHideBillboard(entry)
@@ -2048,6 +2061,27 @@ local function ESPUpdateEntry(player,entry,camera,localRoot)
         entry.headDot.Size=UDim2.fromOffset(7,7)
         entry.headDot.BackgroundColor3=color
         entry.headDot.Visible=true
+    end
+    if headPos and headOn then
+        local textScale=math.clamp(tonumber(Config.ESPTextScale) or 1,.75,1.5)
+        local y=headPos.Y-9
+        if entry.displayLabel then
+            entry.displayLabel.Position=UDim2.fromOffset(headPos.X,y)
+            entry.displayLabel.Text=player.DisplayName
+            entry.displayLabel.TextSize=math.floor(12*textScale+.5)
+            entry.displayLabel.TextColor3=color
+            entry.displayLabel.TextTransparency=math.clamp(1-fade,0,.45)
+            entry.displayLabel.Visible=Config.ESPNames==true
+            if entry.displayLabel.Visible then y-=18*textScale end
+        end
+        if entry.usernameLabel then
+            entry.usernameLabel.Position=UDim2.fromOffset(headPos.X,y)
+            entry.usernameLabel.Text="@"..player.Name
+            entry.usernameLabel.TextSize=math.floor(9*textScale+.5)
+            entry.usernameLabel.TextColor3=C.Sub
+            entry.usernameLabel.TextTransparency=math.clamp((1-fade)+.05,0,.55)
+            entry.usernameLabel.Visible=Config.ESPUsername==true
+        end
     end
     if Config.ESPLookDirection and head and headOn and headPos then
         local lookPos,lookOn=ESPProject(camera,head.Position+head.CFrame.LookVector*2.75)
