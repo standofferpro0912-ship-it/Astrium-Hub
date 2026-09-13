@@ -1,12 +1,11 @@
 --========================================================
 -- ASTRIUM HUB - Premium UI/UX
--- Only keyboard shortcut: O = Open / Close
+-- Premium keybinds + search + profiles + toast notifications
 --========================================================
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local ContextActionService = game:GetService("ContextActionService")
 local TweenService = game:GetService("TweenService")
 
 local AIM_RENDER_NAME = "AstriumHub_Aimbot_Render"
@@ -124,7 +123,20 @@ local Config = {
     Contrast = 0,
     ColorBoost = 0,
     LocalTime = false,
-    PanelKey = Enum.KeyCode.O,
+    -- Premium keybind system (stored as portable names for persistence)
+    Keybind_Panel = "O",
+    Keybind_Aimbot = "Q",
+    Keybind_ESP = "E",
+    Keybind_Speed = "B",
+    Keybind_Fly = "F",
+    Keybind_NoClip = "N",
+    Keybind_Invisibility = "I",
+    Keybind_ThirdPerson = "V",
+    Keybind_Crosshair = "C",
+    Keybind_FullBright = "J",
+    Keybind_InfiniteJump = "None",
+
+    PanelKey = Enum.KeyCode.O, -- compatibility mirror; runtime uses Keybind_Panel
 
 }
 
@@ -265,6 +277,17 @@ local function GetProfileNames()
     return names
 end
 
+local saveRevision = 0
+local function ScheduleAutoSave()
+    saveRevision += 1
+    local revision = saveRevision
+    task.delay(0.22, function()
+        if revision == saveRevision then
+            pcall(function() SaveProfile(Config.ActiveProfile) end)
+        end
+    end)
+end
+
 -- Default profile behavior: load the last active profile on every re-execution.
 if Config.PersistenceEnabled then
     LoadProfilesFromDisk()
@@ -296,6 +319,21 @@ local C = {
     Glow = Color3.fromRGB(92,72,170),
 }
 
+local U = {
+    Bg = Color3.fromRGB(5,4,10),
+    Surface = Color3.fromRGB(13,10,23),
+    Surface2 = Color3.fromRGB(20,15,34),
+    Surface3 = Color3.fromRGB(31,22,52),
+    Border = Color3.fromRGB(77,60,112),
+    Text = Color3.fromRGB(248,246,255),
+    Sub = Color3.fromRGB(176,167,199),
+    Muted = Color3.fromRGB(105,96,127),
+    Accent = Color3.fromRGB(170,102,255),
+    Accent2 = Color3.fromRGB(121,66,214),
+    Good = Color3.fromRGB(95,229,162),
+    Bad = Color3.fromRGB(247,96,123),
+    Glow = Color3.fromRGB(123,75,214),
+}
 local function New(class, props, parent)
     local x = Instance.new(class)
     for k,v in pairs(props or {}) do x[k] = v end
@@ -303,10 +341,10 @@ local function New(class, props, parent)
     return x
 end
 local function Corner(x,r) New("UICorner",{CornerRadius=UDim.new(0,r or 10)},x) end
-local function Outline(x,color,thick,trans) New("UIStroke",{Color=color or C.Border,Thickness=thick or 1,Transparency=trans or 0},x) end
+local function Outline(x,color,thick,trans) New("UIStroke",{Color=color or U.Border,Thickness=thick or 1,Transparency=trans or 0},x) end
 local function Gradient(x,c0,c1,r0,r1)
     local g=Instance.new("UIGradient")
-    g.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,c0 or C.Surface2),ColorSequenceKeypoint.new(1,c1 or C.Surface)})
+    g.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,c0 or U.Surface2),ColorSequenceKeypoint.new(1,c1 or U.Surface)})
     g.Rotation=r0 or 90
     g.Parent=x
     return g
@@ -316,19 +354,19 @@ local function Shadow(x,alpha)
     sh.Name="Shadow"
     sh.AnchorPoint=Vector2.new(.5,.5)
     sh.Position=UDim2.fromScale(.5,.5)
-    sh.Size=UDim2.new(1,26,1,26)
+    sh.Size=UDim2.new(1,30,1,30)
     sh.BackgroundTransparency=1
     sh.Image="rbxassetid://6015897843"
     sh.ImageColor3=Color3.new(0,0,0)
-    sh.ImageTransparency=alpha or .45
+    sh.ImageTransparency=alpha or .50
     sh.ScaleType=Enum.ScaleType.Slice
     sh.SliceCenter=Rect.new(49,49,450,450)
     sh.ZIndex=0
     sh.Parent=x
     return sh
 end
-local function T(x,props,time)
-    TweenService:Create(x,TweenInfo.new(time or .16,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),props):Play()
+local function T(x,props,time,easing)
+    TweenService:Create(x,TweenInfo.new(time or .16,easing or Enum.EasingStyle.Quad,Enum.EasingDirection.Out),props):Play()
 end
 
 --========================================================
@@ -342,8 +380,11 @@ local Scale = New("UIScale",{},Gui)
 local function Resize()
     local cam=workspace.CurrentCamera
     if cam then
-        local s=math.min(cam.ViewportSize.X,cam.ViewportSize.Y)
-        Scale.Scale=math.clamp(s/700,.62,1)
+        local vp=cam.ViewportSize
+        local shortest=math.min(vp.X,vp.Y)
+        local fitX=vp.X/820
+        local fitY=vp.Y/610
+        Scale.Scale=math.clamp(math.min(fitX,fitY),.42,1.02)
     end
 end
 Resize()
@@ -359,31 +400,45 @@ BindCamera()
 local currentCamConn=workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function() task.defer(BindCamera) end)
 
 --========================================================
--- FLOATING OPEN/CLOSE BUTTON
+-- GLASS / FLOATING OPEN BUTTON
 --========================================================
 local Open = New("TextButton",{
-    Size=UDim2.fromOffset(112,44),Position=UDim2.new(0,15,.5,-21),
-    BackgroundColor3=C.Surface,Text="",AutoButtonColor=false,BorderSizePixel=0,
+    Size=UDim2.fromOffset(126,46),Position=UDim2.new(0,16,.5,-23),
+    BackgroundColor3=U.Surface,Text="",AutoButtonColor=false,BorderSizePixel=0,
+    Active=true,ZIndex=120,
 },Gui)
-Corner(Open,13); Outline(Open,C.Border,1,.1); Gradient(Open,C.Surface2,C.Surface,0,90); Shadow(Open,.58)
-local Dot=New("Frame",{Size=UDim2.fromOffset(7,7),Position=UDim2.new(0,13,.5,-3),BackgroundColor3=C.Accent,BorderSizePixel=0},Open); Corner(Dot,8)
-local OpenLabel=New("TextLabel",{Size=UDim2.new(1,-40,1,0),Position=UDim2.fromOffset(31,0),BackgroundTransparency=1,Text="ASTRIUM  [O]",TextColor3=C.Text,TextSize=12,Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Left},Open)
+Corner(Open,15); Outline(Open,U.Border,1,.08); Gradient(Open,U.Surface2,U.Surface,0,90); Shadow(Open,.58)
+local OpenGlass=New("Frame",{Size=UDim2.new(1,-2,1,-2),Position=UDim2.fromOffset(1,1),BackgroundTransparency=.88,BackgroundColor3=Color3.new(1,1,1),BorderSizePixel=0,ZIndex=121},Open); Corner(OpenGlass,14)
+local Dot=New("Frame",{Size=UDim2.fromOffset(7,7),Position=UDim2.new(0,13,.5,-3),BackgroundColor3=U.Accent,BorderSizePixel=0,ZIndex=123},Open); Corner(Dot,8)
+local OpenLabel=New("TextLabel",{Size=UDim2.new(1,-40,1,0),Position=UDim2.fromOffset(31,0),BackgroundTransparency=1,Text="ASTRIUM  •  [O]",TextColor3=U.Text,TextSize=11,Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Left,ZIndex=124},Open)
 
 --========================================================
 -- WINDOW
 --========================================================
 local Main=New("Frame",{
-    Size=UDim2.fromOffset(470,545),Position=UDim2.new(.5,-235,.5,-272.5),
-    BackgroundColor3=C.Bg,BorderSizePixel=0,ClipsDescendants=true,
+    Size=UDim2.fromOffset(820,610),Position=UDim2.new(.5,-410,.5,-305),
+    BackgroundColor3=U.Bg,BorderSizePixel=0,ClipsDescendants=true,Active=true,ZIndex=1,
 },Gui)
-Corner(Main,18); Outline(Main,C.Border,1,0); Gradient(Main,C.Surface,C.Bg,90,90); Shadow(Main,.52)
+Corner(Main,22); Outline(Main,Color3.fromRGB(88,67,125),1,0); Gradient(Main,U.Surface,U.Bg,90,90); Shadow(Main,.42)
+New("Frame",{Size=UDim2.new(1,0,0,2),BackgroundColor3=U.Accent,BorderSizePixel=0,ZIndex=2},Main)
+local MainGlass=New("Frame",{Size=UDim2.new(1,-2,1,-2),Position=UDim2.fromOffset(1,1),BackgroundTransparency=.94,BackgroundColor3=Color3.new(1,1,1),BorderSizePixel=0,ZIndex=1},Main); Corner(MainGlass,21)
 
-local Header=New("Frame",{Size=UDim2.new(1,0,0,74),BackgroundColor3=C.Surface,BorderSizePixel=0,ZIndex=2},Main); Gradient(Header,C.Surface2,C.Surface,0,90)
-New("Frame",{Size=UDim2.fromOffset(4,52),Position=UDim2.fromOffset(10,10),BackgroundColor3=C.Accent,BorderSizePixel=0},Header); Corner(Header:FindFirstChildOfClass("Frame"),4)
-New("TextLabel",{Size=UDim2.new(1,-145,0,26),Position=UDim2.fromOffset(27,10),BackgroundTransparency=1,Text="ASTRIUM HUB",TextColor3=C.Text,TextSize=20,Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Left},Header)
-New("TextLabel",{Size=UDim2.new(1,-145,0,17),Position=UDim2.fromOffset(28,39),BackgroundTransparency=1,Text="PRECISION CONTROL CENTER",TextColor3=C.Sub,TextSize=9,Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Left},Header)
-New("TextLabel",{Size=UDim2.fromOffset(78,18),Position=UDim2.new(1,-122,0,13),BackgroundTransparency=1,Text="O  MENU",TextColor3=C.Sub,TextSize=9,Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Right},Header)
-local Close=New("TextButton",{Size=UDim2.fromOffset(32,32),Position=UDim2.new(1,-43,.5,-2),BackgroundColor3=C.Surface3,Text="×",TextColor3=C.Sub,TextSize=20,Font=Enum.Font.Gotham,AutoButtonColor=false,BorderSizePixel=0},Header); Corner(Close,9)
+local Header=New("Frame",{Size=UDim2.new(1,0,0,92),BackgroundColor3=U.Surface,BorderSizePixel=0,ZIndex=10},Main); Gradient(Header,U.Surface2,U.Surface,0,90)
+New("Frame",{Size=UDim2.new(1,0,0,1),Position=UDim2.new(0,0,1,-1),BackgroundColor3=U.Border,BackgroundTransparency=.55,BorderSizePixel=0,ZIndex=11},Header)
+local Avatar=New("ImageLabel",{Size=UDim2.fromOffset(58,58),Position=UDim2.fromOffset(16,17),BackgroundColor3=U.Surface3,BorderSizePixel=0,Image="",ZIndex=13},Header); Corner(Avatar,29); Outline(Avatar,U.Accent,1,.05)
+local AvatarGlow=New("Frame",{Size=UDim2.new(1,6,1,6),Position=UDim2.fromOffset(-3,-3),BackgroundTransparency=1,BorderSizePixel=0,ZIndex=12},Avatar); Corner(AvatarGlow,32); Outline(AvatarGlow,U.Accent,1,.65)
+task.spawn(function()
+    local ok,content,isReady=pcall(function()
+        return Players:GetUserThumbnailAsync(LocalPlayer.UserId,Enum.ThumbnailType.HeadShot,Enum.ThumbnailSize.Size100x100)
+    end)
+    if ok and isReady and content then Avatar.Image=content end
+end)
+New("TextLabel",{Size=UDim2.new(1,-220,0,28),Position=UDim2.fromOffset(88,14),BackgroundTransparency=1,Text="ASTRIUM HUB",TextColor3=U.Text,TextSize=22,Font=Enum.Font.GothamBlack,TextXAlignment=Enum.TextXAlignment.Left,ZIndex=13},Header)
+local HeaderSub=New("TextLabel",{Size=UDim2.new(1,-250,0,18),Position=UDim2.fromOffset(89,42),BackgroundTransparency=1,Text="TACTICAL CONTROL CENTER  /  ONLINE",TextColor3=U.Sub,TextSize=8,Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Left,ZIndex=13},Header)
+local UserLabel=New("TextLabel",{Size=UDim2.new(1,-250,0,18),Position=UDim2.fromOffset(89,62),BackgroundTransparency=1,Text="@"..LocalPlayer.Name,TextColor3=U.Accent,TextSize=9,Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Left,ZIndex=13},Header)
+local ProfileBadge=New("TextLabel",{Size=UDim2.fromOffset(180,18),Position=UDim2.new(1,-245,0,46),BackgroundTransparency=1,Text="PROFILE: "..tostring(Config.ActiveProfile),TextColor3=U.Accent,TextSize=8,Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Right,ZIndex=13},Header)
+New("TextLabel",{Size=UDim2.fromOffset(100,14),Position=UDim2.new(1,-155,0,14),BackgroundTransparency=1,Text="SYSTEM READY",TextColor3=U.Good,TextSize=7,Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Right,ZIndex=13},Header)
+local Close=New("TextButton",{Size=UDim2.fromOffset(36,36),Position=UDim2.new(1,-50,.5,-18),BackgroundColor3=U.Surface3,Text="×",TextColor3=U.Sub,TextSize=20,Font=Enum.Font.GothamBold,AutoButtonColor=false,BorderSizePixel=0,ZIndex=20},Header); Corner(Close,10); Outline(Close,U.Border,1,.05)
 
 -- draggable header
 local dragging=false; local dragStart; local startPos
@@ -406,11 +461,103 @@ end)
 --========================================================
 -- SIDEBAR + PAGES
 --========================================================
-local Sidebar=New("Frame",{Size=UDim2.new(0,132,1,-82),Position=UDim2.fromOffset(10,80),BackgroundColor3=C.Surface,BorderSizePixel=0},Main); Corner(Sidebar,14); Outline(Sidebar,C.Border)
-New("TextLabel",{Size=UDim2.new(1,-20,0,22),Position=UDim2.fromOffset(10,10),BackgroundTransparency=1,Text="MODULES",TextColor3=C.Muted,TextSize=9,Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Left},Sidebar)
-local TabList=New("ScrollingFrame",{Size=UDim2.new(1,-14,1,-40),Position=UDim2.fromOffset(7,36),BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=3,ScrollBarImageColor3=C.Accent,ScrollBarImageTransparency=.25,AutomaticCanvasSize=Enum.AutomaticSize.Y,CanvasSize=UDim2.new()},Sidebar)
+local Sidebar=New("Frame",{Size=UDim2.new(0,176,1,-108),Position=UDim2.fromOffset(14,102),BackgroundColor3=U.Surface,BorderSizePixel=0,ZIndex=5},Main); Corner(Sidebar,16); Outline(Sidebar,U.Border,1,.16); Gradient(Sidebar,U.Surface2,U.Surface,0,90)
+New("TextLabel",{Size=UDim2.new(1,-24,0,20),Position=UDim2.fromOffset(12,10),BackgroundTransparency=1,Text="ASTRIUM / MODULES",TextColor3=U.Muted,TextSize=8,Font=Enum.Font.GothamBlack,TextXAlignment=Enum.TextXAlignment.Left},Sidebar)
+local TabList=New("ScrollingFrame",{Size=UDim2.new(1,-14,1,-40),Position=UDim2.fromOffset(7,34),BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=2,ScrollBarImageColor3=U.Accent,ScrollBarImageTransparency=.35,AutomaticCanvasSize=Enum.AutomaticSize.Y,CanvasSize=UDim2.new(),ZIndex=6},Sidebar)
 New("UIListLayout",{Padding=UDim.new(0,6),SortOrder=Enum.SortOrder.LayoutOrder},TabList)
-local Area=New("Frame",{Size=UDim2.new(1,-152,1,-82),Position=UDim2.fromOffset(145,80),BackgroundTransparency=1,ClipsDescendants=true},Main)
+local Area=New("Frame",{Size=UDim2.new(1,-204,1,-108),Position=UDim2.fromOffset(198,102),BackgroundTransparency=1,ClipsDescendants=true,ZIndex=4},Main)
+
+--========================================================
+-- PREMIUM SEARCH BAR
+--========================================================
+local SelectTab
+local SearchItems = {}
+local SearchResultsOpen = false
+local SearchBar = New("Frame",{
+    Size=UDim2.new(1,0,0,44),BackgroundColor3=U.Surface,BorderSizePixel=0,ZIndex=50,
+},Area)
+Corner(SearchBar,13); Outline(SearchBar,U.Border,1,.12); Gradient(SearchBar,U.Surface2,U.Surface,0,90)
+local SearchAccent=New("Frame",{Size=UDim2.fromOffset(3,24),Position=UDim2.fromOffset(9,10),BackgroundColor3=U.Accent,BorderSizePixel=0,ZIndex=52},SearchBar); Corner(SearchAccent,3)
+New("TextLabel",{Size=UDim2.fromOffset(24,44),Position=UDim2.fromOffset(16,0),BackgroundTransparency=1,Text="⌕",TextColor3=U.Accent,TextSize=19,Font=Enum.Font.GothamBlack,ZIndex=52},SearchBar)
+local SearchBox=New("TextBox",{Size=UDim2.new(1,-84,1,0),Position=UDim2.fromOffset(43,0),BackgroundTransparency=1,Text="",PlaceholderText="Search modules, toggles, sliders…",PlaceholderColor3=U.Muted,TextColor3=U.Text,TextSize=10,Font=Enum.Font.Gotham,ClearTextOnFocus=false,TextXAlignment=Enum.TextXAlignment.Left,ZIndex=52},SearchBar)
+local SearchClear=New("TextButton",{Size=UDim2.fromOffset(30,30),Position=UDim2.new(1,-37,.5,-15),BackgroundColor3=U.Surface3,Text="×",TextColor3=U.Sub,TextSize=15,Font=Enum.Font.GothamBold,AutoButtonColor=false,BorderSizePixel=0,ZIndex=53},SearchBar); Corner(SearchClear,9)
+
+local SearchResults=New("Frame",{Size=UDim2.new(1,0,0,176),Position=UDim2.fromOffset(0,48),BackgroundColor3=U.Surface,BorderSizePixel=0,Visible=false,ZIndex=60},Area)
+Corner(SearchResults,13); Outline(SearchResults,U.Border,1,.05); Shadow(SearchResults,.72)
+local SearchResultsList=New("ScrollingFrame",{Size=UDim2.new(1,-8,1,-8),Position=UDim2.fromOffset(4,4),BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=2,ScrollBarImageColor3=U.Accent,AutomaticCanvasSize=Enum.AutomaticSize.Y,CanvasSize=UDim2.new(),ZIndex=61},SearchResults)
+New("UIListLayout",{Padding=UDim.new(0,4),SortOrder=Enum.SortOrder.LayoutOrder},SearchResultsList)
+
+local function ClearSearchResults()
+    for _,child in ipairs(SearchResultsList:GetChildren()) do if child:IsA("TextButton") then child:Destroy() end end
+end
+local function PerformSearch(query)
+    query=string.lower((query or ""):gsub("^%s+",""):gsub("%s+$",""))
+    ClearSearchResults()
+    if query=="" then SearchResults.Visible=false; SearchResultsOpen=false; return end
+    local matches={}
+    for _,item in ipairs(SearchItems) do
+        local hay=string.lower(item.title.." "..item.desc)
+        if string.find(hay,query,1,true) then table.insert(matches,item) end
+    end
+    table.sort(matches,function(a,b) return a.title<b.title end)
+    local limit=18
+    for i,item in ipairs(matches) do
+        if i>limit then break end
+        local b=New("TextButton",{Size=UDim2.new(1,0,0,36),BackgroundColor3=U.Surface2,Text="",AutoButtonColor=false,BorderSizePixel=0,LayoutOrder=i,ZIndex=62},SearchResultsList); Corner(b,9)
+        New("TextLabel",{Size=UDim2.new(1,-110,1,0),Position=UDim2.fromOffset(11,0),BackgroundTransparency=1,Text=item.title,TextColor3=U.Text,TextSize=9,Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Left,ZIndex=63},b)
+        New("TextLabel",{Size=UDim2.fromOffset(95,18),Position=UDim2.new(1,-100,.5,-9),BackgroundTransparency=1,Text=item.tabLabel,TextColor3=U.Accent,TextSize=7,Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Right,ZIndex=63},b)
+        b.Activated:Connect(function()
+            SelectTab(item.tabId); SearchBox:ReleaseFocus(); SearchBox.Text=""; SearchResults.Visible=false; SearchResultsOpen=false
+            task.defer(function()
+                local page=item.page
+                if page and item.row then
+                    local targetY=item.row.AbsolutePosition.Y-page.AbsolutePosition.Y+page.CanvasPosition.Y-14
+                    page.CanvasPosition=Vector2.new(0,math.max(0,targetY))
+                end
+            end)
+        end)
+    end
+    if #matches==0 then New("TextLabel",{Size=UDim2.new(1,0,0,42),BackgroundTransparency=1,Text="NO MATCHES  /  TRY ANOTHER QUERY",TextColor3=U.Muted,TextSize=8,Font=Enum.Font.GothamBold,ZIndex=62},SearchResults) end
+    SearchResults.Size=UDim2.new(1,0,0,math.min(184,12+#matches*40))
+    SearchResults.Visible=true; SearchResultsOpen=true
+end
+SearchBox:GetPropertyChangedSignal("Text"):Connect(function() PerformSearch(SearchBox.Text) end)
+SearchClear.Activated:Connect(function() SearchBox.Text=""; SearchBox:ReleaseFocus() end)
+
+--========================================================
+-- PREMIUM TOAST NOTIFICATIONS
+--========================================================
+local ToastGui=New("ScreenGui",{Name="AstriumToasts",ResetOnSpawn=false,IgnoreGuiInset=true,DisplayOrder=500,ZIndexBehavior=Enum.ZIndexBehavior.Sibling},PlayerGui)
+local ToastHolder=New("Frame",{Size=UDim2.fromOffset(330,275),Position=UDim2.new(1,-345,1,-290),BackgroundTransparency=1},ToastGui)
+New("UIListLayout",{Padding=UDim.new(0,8),SortOrder=Enum.SortOrder.LayoutOrder,VerticalAlignment=Enum.VerticalAlignment.Bottom},ToastHolder)
+local ToastSerial=0
+local function Notify(title,message,kind,duration)
+    ToastSerial+=1
+    local serial=ToastSerial
+    local accent=(kind=="error" and U.Bad) or (kind=="success" and U.Good) or U.Accent
+    local toast=New("Frame",{Size=UDim2.new(1,0,0,62),BackgroundColor3=U.Surface,BackgroundTransparency=1,BorderSizePixel=0,LayoutOrder=serial},ToastHolder)
+    Corner(toast,14); Outline(toast,accent,1,.22); Gradient(toast,U.Surface2,U.Surface,0,90)
+    local bar=New("Frame",{Size=UDim2.fromOffset(3,38),Position=UDim2.fromOffset(9,12),BackgroundColor3=accent,BackgroundTransparency=1,BorderSizePixel=0},toast); Corner(bar,3)
+    local ttl=New("TextLabel",{Size=UDim2.new(1,-34,0,20),Position=UDim2.fromOffset(20,8),BackgroundTransparency=1,Text=tostring(title),TextColor3=U.Text,TextTransparency=1,TextSize=10,Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Left},toast)
+    local msg=New("TextLabel",{Size=UDim2.new(1,-34,0,19),Position=UDim2.fromOffset(20,31),BackgroundTransparency=1,Text=tostring(message or ""),TextColor3=U.Sub,TextTransparency=1,TextSize=8,Font=Enum.Font.Gotham,TextWrapped=true,TextXAlignment=Enum.TextXAlignment.Left},toast)
+    for _,obj in ipairs({toast,ttl,msg,bar}) do
+        local props={}
+        if obj==toast then props.BackgroundTransparency=.04 elseif obj==bar then props.BackgroundTransparency=0 else props.TextTransparency=0 end
+        TweenService:Create(obj,TweenInfo.new(.20,Enum.EasingStyle.Quint,Enum.EasingDirection.Out),props):Play()
+    end
+    while #ToastHolder:GetChildren()-1>5 do
+        local oldest=nil
+        for _,child in ipairs(ToastHolder:GetChildren()) do if child:IsA("Frame") and child~=toast and (not oldest or child.LayoutOrder<oldest.LayoutOrder) then oldest=child end end
+        if oldest then oldest:Destroy() else break end
+    end
+    task.delay(duration or 2.4,function()
+        if not toast.Parent then return end
+        local fade=TweenInfo.new(.22,Enum.EasingStyle.Quint,Enum.EasingDirection.In)
+        TweenService:Create(toast,fade,{BackgroundTransparency=1}):Play(); TweenService:Create(ttl,fade,{TextTransparency=1}):Play(); TweenService:Create(msg,fade,{TextTransparency=1}):Play(); TweenService:Create(bar,fade,{BackgroundTransparency=1}):Play()
+        task.wait(.24); if toast.Parent then toast:Destroy() end
+    end)
+    return serial
+end
 
 local tabDefs={
     {id="Combat",label="Combat",icon="⊙",desc="Targeting"},
@@ -426,128 +573,128 @@ local tabDefs={
     {id="Settings",label="Settings",icon="⚙",desc="Interface"},
 }
 local Tabs={}; local Pages={}; local CurrentTab="Combat"; local Refreshers={}
-
+local function RefreshAllUI() for _, refresh in ipairs(Refreshers) do pcall(refresh) end end
 local function Page(id,title,desc)
-    local p=New("ScrollingFrame",{Name=id.."Page",Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=4,ScrollBarImageColor3=C.Accent,ScrollBarImageTransparency=.25,AutomaticCanvasSize=Enum.AutomaticSize.Y,CanvasSize=UDim2.new(),Visible=false},Area)
-    New("UIPadding",{PaddingLeft=UDim.new(0,4),PaddingRight=UDim.new(0,7),PaddingBottom=UDim.new(0,10)},p)
-    New("UIListLayout",{Padding=UDim.new(0,8),SortOrder=Enum.SortOrder.LayoutOrder},p)
-    local h=New("Frame",{Size=UDim2.new(1,0,0,52),BackgroundTransparency=1},p)
-    New("TextLabel",{Size=UDim2.new(1,0,0,28),BackgroundTransparency=1,Text=title,TextColor3=C.Text,TextSize=20,Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Left},h)
-    New("TextLabel",{Size=UDim2.new(1,0,0,18),Position=UDim2.fromOffset(0,29),BackgroundTransparency=1,Text=desc,TextColor3=C.Sub,TextSize=9,Font=Enum.Font.Gotham,TextXAlignment=Enum.TextXAlignment.Left},h)
+    local p=New("ScrollingFrame",{Name=id.."Page",Size=UDim2.new(1,0,1,-58),Position=UDim2.fromOffset(0,58),BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=3,ScrollBarImageColor3=U.Accent,ScrollBarImageTransparency=.32,AutomaticCanvasSize=Enum.AutomaticSize.Y,CanvasSize=UDim2.new(),Visible=false,ZIndex=5},Area)
+    New("UIPadding",{PaddingLeft=UDim.new(0,2),PaddingRight=UDim.new(0,8),PaddingBottom=UDim.new(0,12)},p)
+    New("UIListLayout",{Padding=UDim.new(0,9),SortOrder=Enum.SortOrder.LayoutOrder},p)
+    local h=New("Frame",{Size=UDim2.new(1,0,0,54),BackgroundTransparency=1},p)
+    New("TextLabel",{Size=UDim2.new(1,0,0,30),BackgroundTransparency=1,Text=title,TextColor3=U.Text,TextSize=20,Font=Enum.Font.GothamBlack,TextXAlignment=Enum.TextXAlignment.Left},h)
+    New("TextLabel",{Size=UDim2.new(1,0,0,18),Position=UDim2.fromOffset(0,31),BackgroundTransparency=1,Text=desc,TextColor3=U.Sub,TextSize=8,Font=Enum.Font.Gotham,TextXAlignment=Enum.TextXAlignment.Left},h)
     Pages[id]=p; return p
 end
 for n,d in ipairs(tabDefs) do
-    local b=New("TextButton",{Size=UDim2.new(1,0,0,43),BackgroundColor3=C.Surface,Text="",AutoButtonColor=false,BorderSizePixel=0,LayoutOrder=n},TabList); Corner(b,10)
-    local bar=New("Frame",{Size=UDim2.fromOffset(3,24),Position=UDim2.new(0,0,.5,-12),BackgroundColor3=C.Accent,BackgroundTransparency=1,BorderSizePixel=0},b); Corner(bar,4)
-    local icon=New("TextLabel",{Size=UDim2.fromOffset(26,43),Position=UDim2.fromOffset(9,0),BackgroundTransparency=1,Text=d.icon,TextColor3=C.Sub,TextSize=15,Font=Enum.Font.GothamBold},b)
-    local lab=New("TextLabel",{Size=UDim2.new(1,-41,1,0),Position=UDim2.fromOffset(38,0),BackgroundTransparency=1,Text=d.label,TextColor3=C.Sub,TextSize=10,Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Left},b)
-    Tabs[d.id]={b=b,bar=bar,icon=icon,lab=lab}
+    local b=New("TextButton",{Size=UDim2.new(1,0,0,48),BackgroundColor3=U.Surface,Text="",AutoButtonColor=false,BorderSizePixel=0,LayoutOrder=n,ZIndex=7},TabList); Corner(b,11); Outline(b,U.Border,1,.7)
+    local bar=New("Frame",{Size=UDim2.fromOffset(3,28),Position=UDim2.new(0,0,.5,-14),BackgroundColor3=U.Accent,BackgroundTransparency=1,BorderSizePixel=0,ZIndex=8},b); Corner(bar,4)
+    local icon=New("TextLabel",{Size=UDim2.fromOffset(30,48),Position=UDim2.fromOffset(10,0),BackgroundTransparency=1,Text=d.icon,TextColor3=U.Sub,TextSize=15,Font=Enum.Font.GothamBold,ZIndex=8},b)
+    local lab=New("TextLabel",{Size=UDim2.new(1,-52,0,17),Position=UDim2.fromOffset(43,7),BackgroundTransparency=1,Text=d.label,TextColor3=U.Sub,TextSize=9,Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Left,ZIndex=8},b)
+    local tiny=New("TextLabel",{Size=UDim2.new(1,-52,0,14),Position=UDim2.fromOffset(43,25),BackgroundTransparency=1,Text=d.desc,TextColor3=U.Muted,TextSize=7,Font=Enum.Font.Gotham,ZIndex=8,TextXAlignment=Enum.TextXAlignment.Left},b)
+    Tabs[d.id]={b=b,bar=bar,icon=icon,lab=lab,tiny=tiny}
 end
 for _,d in ipairs(tabDefs) do Page(d.id,d.label,d.desc) end
-
-local function SelectTab(id)
+SelectTab=function(id)
     CurrentTab=id
     for k,t in pairs(Tabs) do
         local active=k==id
-        T(t.b,{BackgroundColor3=active and C.Surface3 or C.Surface},.12)
-        T(t.icon,{TextColor3=active and C.Text or C.Sub},.12)
-        T(t.lab,{TextColor3=active and C.Text or C.Sub},.12)
-        T(t.bar,{BackgroundTransparency=active and 0 or 1},.12)
+        T(t.b,{BackgroundColor3=active and U.Surface3 or U.Surface},.13)
+        T(t.icon,{TextColor3=active and U.Text or U.Sub},.13)
+        T(t.lab,{TextColor3=active and U.Text or U.Sub},.13)
+        T(t.tiny,{TextColor3=active and U.Sub or U.Muted},.13)
+        T(t.bar,{BackgroundTransparency=active and 0 or 1},.13)
     end
     for k,p in pairs(Pages) do p.Visible=(k==id) end
 end
 for id,t in pairs(Tabs) do
     t.b.Activated:Connect(function() SelectTab(id) end)
-    t.b.MouseEnter:Connect(function() if CurrentTab~=id then T(t.b,{BackgroundColor3=C.Surface2},.1) end end)
-    t.b.MouseLeave:Connect(function() if CurrentTab~=id then T(t.b,{BackgroundColor3=C.Surface},.1) end end)
+    t.b.MouseEnter:Connect(function() if CurrentTab~=id then T(t.b,{BackgroundColor3=U.Surface2},.1) end end)
+    t.b.MouseLeave:Connect(function() if CurrentTab~=id then T(t.b,{BackgroundColor3=U.Surface},.1) end end)
 end
 
 --========================================================
 -- COMPONENTS
 --========================================================
 local function Section(p,title,sub)
-    local f=New("Frame",{Size=UDim2.new(1,0,0,48),BackgroundColor3=C.Surface,BorderSizePixel=0},p); Corner(f,12); Outline(f,C.Border,1,.18); Gradient(f,C.Surface2,C.Surface,0,90)
-    local mark=New("Frame",{Size=UDim2.fromOffset(3,30),Position=UDim2.fromOffset(10,9),BackgroundColor3=C.Accent,BorderSizePixel=0},f); Corner(mark,3)
-    New("TextLabel",{Size=UDim2.new(1,-28,0,19),Position=UDim2.fromOffset(20,6),BackgroundTransparency=1,Text=title,TextColor3=C.Text,TextSize=11,Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Left},f)
-    New("TextLabel",{Size=UDim2.new(1,-28,0,15),Position=UDim2.fromOffset(20,27),BackgroundTransparency=1,Text=sub or "",TextColor3=C.Muted,TextSize=8,Font=Enum.Font.Gotham,TextXAlignment=Enum.TextXAlignment.Left},f)
+    local f=New("Frame",{Size=UDim2.new(1,0,0,50),BackgroundColor3=U.Surface,BorderSizePixel=0,ZIndex=6},p); Corner(f,13); Outline(f,U.Border,1,.25); Gradient(f,U.Surface2,U.Surface,0,90)
+    local mark=New("Frame",{Size=UDim2.fromOffset(3,31),Position=UDim2.fromOffset(10,10),BackgroundColor3=U.Accent,BorderSizePixel=0},f)
+    Corner(mark,3)
+    New("TextLabel",{Size=UDim2.new(1,-32,0,19),Position=UDim2.fromOffset(20,6),BackgroundTransparency=1,Text=title,TextColor3=U.Text,TextSize=10,Font=Enum.Font.GothamBlack,TextXAlignment=Enum.TextXAlignment.Left},f)
+    New("TextLabel",{Size=UDim2.new(1,-32,0,15),Position=UDim2.fromOffset(20,28),BackgroundTransparency=1,Text=sub or "",TextColor3=U.Muted,TextSize=7,Font=Enum.Font.Gotham,TextXAlignment=Enum.TextXAlignment.Left},f)
     return f
 end
+local function RegisterSearchItem(p,title,desc,row)
+    local tabId=string.gsub(p.Name,"Page$","")
+    table.insert(SearchItems,{title=tostring(title),desc=tostring(desc or ""),row=row,page=p,tabId=tabId,tabLabel=tabId})
+end
 local function Toggle(p,title,desc,get,set)
-    local r=New("Frame",{Size=UDim2.new(1,0,0,70),BackgroundColor3=C.Surface,BorderSizePixel=0},p); Corner(r,12); Outline(r,C.Border,1,.15); Gradient(r,C.Surface2,C.Surface,0,90)
-    local accent=New("Frame",{Size=UDim2.fromOffset(2,42),Position=UDim2.fromOffset(0,14),BackgroundColor3=C.Accent,BackgroundTransparency=.65,BorderSizePixel=0},r); Corner(accent,3)
-    New("TextLabel",{Size=UDim2.new(1,-92,0,21),Position=UDim2.fromOffset(14,8),BackgroundTransparency=1,Text=title,TextColor3=C.Text,TextSize=11,Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Left},r)
-    New("TextLabel",{Size=UDim2.new(1,-92,0,24),Position=UDim2.fromOffset(14,31),BackgroundTransparency=1,Text=desc,TextColor3=C.Sub,TextSize=8,Font=Enum.Font.Gotham,TextWrapped=true,TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Top},r)
-    local sw=New("TextButton",{Size=UDim2.fromOffset(54,28),Position=UDim2.new(1,-68,.5,-14),BackgroundColor3=C.Surface3,Text="",AutoButtonColor=false,BorderSizePixel=0,ZIndex=3},r); Corner(sw,14); Outline(sw,C.Border,1,.1)
-    local track=New("Frame",{Size=UDim2.new(1,-6,1,-6),Position=UDim2.fromOffset(3,3),BackgroundColor3=C.Surface3,BorderSizePixel=0},sw); Corner(track,12)
-    local knob=New("Frame",{Size=UDim2.fromOffset(20,20),Position=UDim2.fromOffset(4,4),BackgroundColor3=C.Sub,BorderSizePixel=0},sw); Corner(knob,10)
-    local stateLabel=New("TextLabel",{Size=UDim2.fromOffset(28,14),Position=UDim2.new(0,-34,.5,-7),BackgroundTransparency=1,TextColor3=C.Muted,TextSize=8,Font=Enum.Font.GothamBold,Text="OFF",TextXAlignment=Enum.TextXAlignment.Right},sw)
+    local r=New("Frame",{Size=UDim2.new(1,0,0,76),BackgroundColor3=U.Surface,BorderSizePixel=0,ZIndex=6},p); Corner(r,13); Outline(r,U.Border,1,.22); Gradient(r,U.Surface2,U.Surface,0,90)
+    RegisterSearchItem(p,title,desc,r)
+    local accent=New("Frame",{Size=UDim2.fromOffset(2,46),Position=UDim2.fromOffset(0,15),BackgroundColor3=U.Accent,BackgroundTransparency=.72,BorderSizePixel=0},r); Corner(accent,3)
+    New("TextLabel",{Size=UDim2.new(1,-105,0,22),Position=UDim2.fromOffset(14,8),BackgroundTransparency=1,Text=title,TextColor3=U.Text,TextSize=10,Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Left},r)
+    New("TextLabel",{Size=UDim2.new(1,-105,0,28),Position=UDim2.fromOffset(14,33),BackgroundTransparency=1,Text=desc,TextColor3=U.Sub,TextSize=7,Font=Enum.Font.Gotham,TextWrapped=true,TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Top},r)
+    local sw=New("TextButton",{Size=UDim2.fromOffset(58,32),Position=UDim2.new(1,-71,.5,-16),BackgroundColor3=U.Surface3,Text="",AutoButtonColor=false,BorderSizePixel=0,ZIndex=8,Active=true},r); Corner(sw,16); Outline(sw,U.Border,1,.08)
+    local track=New("Frame",{Size=UDim2.new(1,-6,1,-6),Position=UDim2.fromOffset(3,3),BackgroundColor3=U.Surface3,BorderSizePixel=0,ZIndex=9},sw); Corner(track,13)
+    local knob=New("Frame",{Size=UDim2.fromOffset(22,22),Position=UDim2.fromOffset(4,5),BackgroundColor3=U.Sub,BorderSizePixel=0,ZIndex=10},sw); Corner(knob,11)
+    local stateLabel=New("TextLabel",{Size=UDim2.fromOffset(28,14),Position=UDim2.new(0,-34,.5,-7),BackgroundTransparency=1,TextColor3=U.Muted,TextSize=7,Font=Enum.Font.GothamBlack,Text="OFF",TextXAlignment=Enum.TextXAlignment.Right,ZIndex=9},sw)
     local refresh=function()
         local on=not not get()
-        T(track,{BackgroundColor3=on and C.Accent2 or C.Surface3},.12)
-        T(knob,{Position=on and UDim2.new(1,-24,0,4) or UDim2.fromOffset(4,4),BackgroundColor3=on and Color3.new(1,1,1) or C.Sub},.14)
-        T(stateLabel,{TextColor3=on and C.Accent or C.Muted},.12)
-        stateLabel.Text=on and "ON" or "OFF"
-        T(accent,{BackgroundTransparency=on and 0 or .65},.12)
+        T(track,{BackgroundColor3=on and U.Accent2 or U.Surface3},.12)
+        T(knob,{Position=on and UDim2.new(1,-26,0,5) or UDim2.fromOffset(4,5),BackgroundColor3=on and Color3.new(1,1,1) or U.Sub},.14)
+        T(stateLabel,{TextColor3=on and U.Accent or U.Muted},.12); stateLabel.Text=on and "ON" or "OFF"
+        T(accent,{BackgroundTransparency=on and 0 or .72},.12)
     end
     sw.Activated:Connect(function()
         local nextValue=not not (not get())
-        set(nextValue)
-        refresh()
-        SaveProfile(Config.ActiveProfile)
+        local ok,err=pcall(function() set(nextValue) end)
+        if not ok then Notify("Action failed",tostring(err),"error",3); return end
+        refresh(); ScheduleAutoSave(); Notify(title,nextValue and "Enabled" or "Disabled",nextValue and "success" or "info")
     end)
-    r.MouseEnter:Connect(function() T(r,{BackgroundColor3=C.Surface2},.1) end)
-    r.MouseLeave:Connect(function() T(r,{BackgroundColor3=C.Surface},.1) end)
+    r.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then T(r,{BackgroundColor3=U.Surface3},.10) end end)
+    r.InputEnded:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then T(r,{BackgroundColor3=U.Surface},.10) end end)
     refresh(); table.insert(Refreshers,refresh); return refresh
 end
 local function Slider(p,title,desc,min,max,step,get,set)
-    local r=New("Frame",{Size=UDim2.new(1,0,0,87),BackgroundColor3=C.Surface,BorderSizePixel=0},p); Corner(r,11); Outline(r,C.Border)
-    New("TextLabel",{Size=UDim2.new(1,-70,0,20),Position=UDim2.fromOffset(12,8),BackgroundTransparency=1,Text=title,TextColor3=C.Text,TextSize=11,Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Left},r)
-    local val=New("TextLabel",{Size=UDim2.fromOffset(58,20),Position=UDim2.new(1,-70,0,8),BackgroundTransparency=1,TextColor3=C.Accent,TextSize=11,Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Right},r)
-    New("TextLabel",{Size=UDim2.new(1,-24,0,16),Position=UDim2.fromOffset(12,29),BackgroundTransparency=1,Text=desc,TextColor3=C.Sub,TextSize=8,Font=Enum.Font.Gotham,TextXAlignment=Enum.TextXAlignment.Left},r)
-    local tr=New("Frame",{Size=UDim2.new(1,-24,0,7),Position=UDim2.new(0,12,1,-20),BackgroundColor3=C.Surface3,BorderSizePixel=0},r); Corner(tr,6)
-    local fill=New("Frame",{Size=UDim2.new(),BackgroundColor3=C.Accent,BorderSizePixel=0},tr); Corner(fill,6)
-    local knob=New("TextButton",{Size=UDim2.fromOffset(18,18),Position=UDim2.new(0,-9,.5,-9),BackgroundColor3=Color3.new(1,1,1),Text="",AutoButtonColor=false,BorderSizePixel=0},tr); Corner(knob,9); Outline(knob,C.Accent)
+    local r=New("Frame",{Size=UDim2.new(1,0,0,93),BackgroundColor3=U.Surface,BorderSizePixel=0,ZIndex=6},p); Corner(r,13); Outline(r,U.Border,1,.22); Gradient(r,U.Surface2,U.Surface,0,90)
+    RegisterSearchItem(p,title,desc,r)
+    New("TextLabel",{Size=UDim2.new(1,-78,0,20),Position=UDim2.fromOffset(12,8),BackgroundTransparency=1,Text=title,TextColor3=U.Text,TextSize=10,Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Left},r)
+    local val=New("TextLabel",{Size=UDim2.fromOffset(65,20),Position=UDim2.new(1,-75,0,8),BackgroundTransparency=1,TextColor3=U.Accent,TextSize=10,Font=Enum.Font.GothamBlack,TextXAlignment=Enum.TextXAlignment.Right},r)
+    New("TextLabel",{Size=UDim2.new(1,-24,0,16),Position=UDim2.fromOffset(12,30),BackgroundTransparency=1,Text=desc,TextColor3=U.Sub,TextSize=7,Font=Enum.Font.Gotham,TextXAlignment=Enum.TextXAlignment.Left},r)
+    local tr=New("Frame",{Size=UDim2.new(1,-24,0,8),Position=UDim2.new(0,12,1,-23),BackgroundColor3=U.Surface3,BorderSizePixel=0,ZIndex=7},r); Corner(tr,7)
+    local fill=New("Frame",{Size=UDim2.new(),BackgroundColor3=U.Accent,BorderSizePixel=0,ZIndex=8},tr); Corner(fill,7)
+    local knob=New("TextButton",{Size=UDim2.fromOffset(20,20),Position=UDim2.new(0,-10,.5,-10),BackgroundColor3=Color3.new(1,1,1),Text="",AutoButtonColor=false,BorderSizePixel=0,ZIndex=9},tr); Corner(knob,10); Outline(knob,U.Accent)
     local slide=false
     local function setX(x)
-        local a=math.clamp((x-tr.AbsolutePosition.X)/tr.AbsoluteSize.X,0,1)
+        local a=math.clamp((x-tr.AbsolutePosition.X)/math.max(tr.AbsoluteSize.X,1),0,1)
         local v=math.floor(((min+(max-min)*a)/step)+.5)*step
         set(math.clamp(v,min,max))
     end
     local function refresh()
-        local v=get(); local a=(v-min)/(max-min)
-        val.Text=tostring(v); fill.Size=UDim2.new(a,0,1,0); knob.Position=UDim2.new(a,-9,.5,-9)
+        local v=get(); local a=math.clamp((v-min)/(max-min),0,1)
+        val.Text=tostring(v); fill.Size=UDim2.new(a,0,1,0); knob.Position=UDim2.new(a,-10,.5,-10)
     end
     tr.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then slide=true; setX(i.Position.X); refresh() end end)
     UserInputService.InputChanged:Connect(function(i) if slide and (i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch) then setX(i.Position.X); refresh() end end)
-    UserInputService.InputEnded:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then slide=false; SaveProfile(Config.ActiveProfile) end end)
+    UserInputService.InputEnded:Connect(function(i) if slide and (i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch) then slide=false; ScheduleAutoSave(); Notify(title,"Set to "..tostring(get()),"success",1.7) end end)
     refresh(); table.insert(Refreshers,refresh); return refresh
 end
 local function Info(p,title,desc,accent)
-    local r=New("Frame",{Size=UDim2.new(1,0,0,61),BackgroundColor3=C.Surface,BorderSizePixel=0},p); Corner(r,11); Outline(r,C.Border)
-    local line=New("Frame",{Size=UDim2.fromOffset(3,31),Position=UDim2.fromOffset(10,13),BackgroundColor3=accent or C.Accent,BorderSizePixel=0},r); Corner(line,3)
-    New("TextLabel",{Size=UDim2.new(1,-38),Position=UDim2.fromOffset(20,8),BackgroundTransparency=1,Text=title,TextColor3=C.Text,TextSize=10,Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Left},r)
-    New("TextLabel",{Size=UDim2.new(1,-38),Position=UDim2.fromOffset(20,28),BackgroundTransparency=1,Text=desc,TextColor3=C.Sub,TextSize=8,Font=Enum.Font.Gotham,TextXAlignment=Enum.TextXAlignment.Left},r)
+    local r=New("Frame",{Size=UDim2.new(1,0,0,64),BackgroundColor3=U.Surface,BorderSizePixel=0,ZIndex=6},p); Corner(r,13); Outline(r,U.Border,1,.24); Gradient(r,U.Surface2,U.Surface,0,90)
+    local line=New("Frame",{Size=UDim2.fromOffset(3,34),Position=UDim2.fromOffset(10,14),BackgroundColor3=accent or U.Accent,BorderSizePixel=0},r); Corner(line,3)
+    New("TextLabel",{Size=UDim2.new(1,-40,0,20),Position=UDim2.fromOffset(20,8),BackgroundTransparency=1,Text=title,TextColor3=U.Text,TextSize=9,Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Left},r)
+    New("TextLabel",{Size=UDim2.new(1,-40,0,22),Position=UDim2.fromOffset(20,30),BackgroundTransparency=1,Text=desc,TextColor3=U.Sub,TextSize=7,Font=Enum.Font.Gotham,TextWrapped=true,TextXAlignment=Enum.TextXAlignment.Left},r)
     return r
 end
 local function Action(p,title,desc,callback,color)
-    local b=New("TextButton",{Size=UDim2.new(1,0,0,61),BackgroundColor3=C.Surface,Text="",AutoButtonColor=false,BorderSizePixel=0,Active=true},p); Corner(b,12); Outline(b,C.Border,1,.15); Gradient(b,C.Surface2,C.Surface,0,90)
-    local line=New("Frame",{Size=UDim2.fromOffset(3,31),Position=UDim2.fromOffset(10,13),BackgroundColor3=color or C.Accent,BorderSizePixel=0},b); Corner(line,3)
-    New("TextLabel",{Size=UDim2.new(1,-55,0,21),Position=UDim2.fromOffset(20,8),BackgroundTransparency=1,Text=title,TextColor3=C.Text,TextSize=10,Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Left,Active=false},b)
-    local descLabel=New("TextLabel",{Size=UDim2.new(1,-55,0,19),Position=UDim2.fromOffset(20,28),BackgroundTransparency=1,Text="",TextColor3=C.Sub,TextSize=8,Font=Enum.Font.Gotham,TextXAlignment=Enum.TextXAlignment.Left,Active=false},b)
-    local function refresh()
-        local value = type(desc)=="function" and desc() or desc
-        descLabel.Text=tostring(value or "")
-    end
+    local b=New("TextButton",{Size=UDim2.new(1,0,0,64),BackgroundColor3=U.Surface,Text="",AutoButtonColor=false,BorderSizePixel=0,Active=true,ZIndex=6},p); Corner(b,13); Outline(b,U.Border,1,.22); Gradient(b,U.Surface2,U.Surface,0,90)
+    local line=New("Frame",{Size=UDim2.fromOffset(3,34),Position=UDim2.fromOffset(10,14),BackgroundColor3=color or U.Accent,BorderSizePixel=0},b); Corner(line,3)
+    New("TextLabel",{Size=UDim2.new(1,-62,0,21),Position=UDim2.fromOffset(20,8),BackgroundTransparency=1,Text=title,TextColor3=U.Text,TextSize=9,Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Left,Active=false},b)
+    local descLabel=New("TextLabel",{Size=UDim2.new(1,-62,0,22),Position=UDim2.fromOffset(20,31),BackgroundTransparency=1,Text="",TextColor3=U.Sub,TextSize=7,Font=Enum.Font.Gotham,TextWrapped=true,TextXAlignment=Enum.TextXAlignment.Left,Active=false},b)
+    local function refresh() local value=type(desc)=="function" and desc() or desc; descLabel.Text=tostring(value or "") end
     refresh()
-    local a=New("TextLabel",{Size=UDim2.fromOffset(24,57),Position=UDim2.new(1,-31,0,0),BackgroundTransparency=1,Text="›",TextColor3=C.Muted,TextSize=22,Font=Enum.Font.Gotham,Active=false},b)
-    b.Activated:Connect(function()
-        callback()
-        refresh()
-    end)
-    b.MouseEnter:Connect(function() T(b,{BackgroundColor3=C.Surface2},.1); T(a,{TextColor3=C.Text},.1) end)
-    b.MouseLeave:Connect(function() T(b,{BackgroundColor3=C.Surface},.1); T(a,{TextColor3=C.Muted},.1) end)
-    table.insert(Refreshers,refresh)
-    return b,refresh
+    local a=New("TextLabel",{Size=UDim2.fromOffset(30,60),Position=UDim2.new(1,-37,0,2),BackgroundTransparency=1,Text="›",TextColor3=U.Muted,TextSize=22,Font=Enum.Font.Gotham,Active=false},b)
+    b.Activated:Connect(function() callback(); refresh() end)
+    b.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then T(b,{BackgroundColor3=U.Surface3},.10) end end)
+    b.InputEnded:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then T(b,{BackgroundColor3=U.Surface},.10) end end)
+    table.insert(Refreshers,refresh); return b,refresh
 end
 
 --========================================================
@@ -575,7 +722,7 @@ end,function()
     Config.AimTargetPart=parts[(i % #parts)+1]
     ResetAimState()
     SaveProfile(Config.ActiveProfile)
-end,C.Accent)
+end,U.Accent)
 Action(Pages.Combat,"Target Priority",function()
     return "Mode: "..tostring(Config.AimTargetMode).." • tap to cycle."
 end,function()
@@ -584,12 +731,12 @@ end,function()
     Config.AimTargetMode=modes[(i % #modes)+1]
     ResetAimState()
     SaveProfile(Config.ActiveProfile)
-end,C.Accent)
+end,U.Accent)
 Toggle(Pages.Combat,"Stable Target Lock","Keeps the current valid target and prevents target flicker.",function() return Config.AimTargetLock end,function(v) Config.AimTargetLock=v; ResetAimState() end)
 Slider(Pages.Combat,"Reacquire Delay","Delay before selecting another target after loss.",0,0.30,0.01,function() return Config.AimRetargetDelay end,function(v) Config.AimRetargetDelay=v end)
 Toggle(Pages.Combat,"Smooth Aim","Moves the camera toward the target instead of snapping instantly.",function() return Config.AimSmooth end,function(v) Config.AimSmooth=v end)
 Slider(Pages.Combat,"Aim Smoothness","Higher values feel faster and more responsive.",1,20,1,function() return Config.AimSmoothness end,function(v) Config.AimSmoothness=v end)
-Info(Pages.Combat,"Target validation","Requires a live, visible and on-screen player.",C.Good)
+Info(Pages.Combat,"Target validation","Requires a live, visible and on-screen player.",U.Good)
 
 Section(Pages.ESP,"ESP CORE","Premium layered player visualization")
 Toggle(Pages.ESP,"Enable ESP","Master switch for every ESP layer.",function() return Config.ESP end,function(v) Config.ESP=v end)
@@ -624,7 +771,7 @@ Slider(Pages.ESP,"Tracer Thickness","Tracer/snapline thickness.",1,4,1,function(
 Slider(Pages.ESP,"Skeleton Thickness","Skeleton line thickness.",1,4,1,function() return Config.ESPSkeletonThickness end,function(v) Config.ESPSkeletonThickness=v end)
 Slider(Pages.ESP,"Text Scale","Scale all compact ESP labels.",0.75,1.5,0.05,function() return Config.ESPTextScale end,function(v) Config.ESPTextScale=v end)
 Slider(Pages.ESP,"Arrow Size","Off-screen target arrow size.",8,24,1,function() return Config.ESPArrowSize end,function(v) Config.ESPArrowSize=v end)
-Info(Pages.ESP,"Hybrid renderer","Highlight + BillboardGui info + projected 3D cuboids/tracers/skeletons, with pooling and distance culling.",C.Good)
+Info(Pages.ESP,"Hybrid renderer","Highlight + BillboardGui info + projected 3D cuboids/tracers/skeletons, with pooling and distance culling.",U.Good)
 
 Section(Pages.Movement,"MOVEMENT","Movement and collision controls")
 Toggle(Pages.Movement,"Speed","Changes Humanoid WalkSpeed while enabled.",function() return Config.Speed end,function(v) Config.Speed=v end)
@@ -633,11 +780,11 @@ Toggle(Pages.Movement,"NoClip","Disables character collision while enabled.",fun
 Toggle(Pages.Movement,"Fly","Camera-relative flight with vertical controls.",function() return Config.Fly end,function(v) Config.Fly=v; SetFly(v) end)
 Slider(Pages.Movement,"Fly Speed","Horizontal and vertical flight speed.",10,250,5,function() return Config.FlySpeed end,function(v) Config.FlySpeed=v end)
 Toggle(Pages.Movement,"Infinite Jump","Allows jump requests while airborne on the local client.",function() return Config.InfiniteJump end,function(v) Config.InfiniteJump=v end)
-Info(Pages.Movement,"Fly controls","W/A/S/D moves relative to the camera • Space rises • LeftControl descends.",C.Good)
+Info(Pages.Movement,"Fly controls","W/A/S/D moves relative to the camera • Space rises • LeftControl descends.",U.Good)
 
 Section(Pages.Player,"CHARACTER","Character presentation")
 Toggle(Pages.Player,"Invisibility","Makes your character locally transparent on this client.",function() return Config.Invisibility end,function(v) Config.Invisibility=v; Invisibility(v) end)
-Info(Pages.Player,"Client-side","Invisibility uses local transparency and is not server-authoritative.",C.Accent)
+Info(Pages.Player,"Client-side","Invisibility uses local transparency and is not server-authoritative.",U.Accent)
 
 Section(Pages.Client,"CAMERA","Local camera controls")
 Slider(Pages.Client,"Field of View","Local camera field of view.",40,120,1,function() return Config.FOV end,function(v) Config.FOV=v end)
@@ -659,38 +806,229 @@ Toggle(Pages.Performance,"FPS Counter","Shows your current client FPS.",function
 Toggle(Pages.Performance,"Ping Counter","Shows the local player's reported ping.",function() return Config.PingCounter end,function(v) Config.PingCounter=v end)
 Toggle(Pages.Performance,"Coordinates","Shows your current character coordinates.",function() return Config.Coordinates end,function(v) Config.Coordinates=v end)
 Toggle(Pages.Performance,"Safe Low Graphics","Cheap, reversible local optimization; does not scan the whole workspace.",function() return Config.LowGraphics end,function(v) Config.LowGraphics=v end)
-Info(Pages.Performance,"Performance first","All options in this tab are designed to affect the local client only.",C.Good)
+Info(Pages.Performance,"Performance first","All options in this tab are designed to affect the local client only.",U.Good)
 
-Section(Pages.Settings,"INTERFACE","Quality-of-life controls")
-Info(Pages.Settings,"Keyboard shortcut","O is the ONLY keyboard shortcut: open / close the panel.",C.Accent)
-Action(Pages.Settings,"Center panel","Restore the window to the center of the screen.",function() Main.Position=UDim2.new(.5,-235,.5,-272.5) end,C.Good)
-Action(Pages.Settings,"Reset features","Turn every gameplay feature off and restore movement state.",function()
+Section(Pages.Settings,"INTERFACE","Premium controls and quality of life")
+Info(Pages.Settings,"Search","Search toggles and sliders from every tab using the field above.",U.Accent)
+Action(Pages.Settings,"Center panel","Restore the window to the center of the screen.",function() Main.Position=UDim2.new(.5,-235,.5,-272.5); Notify("Interface","Panel centered","success") end,U.Good)
+Action(Pages.Settings,"Reset features","Turn gameplay features off and restore movement state.",function()
     Config.Aimbot=false; Config.ESP=false; Config.Speed=false; Config.NoClip=false; Config.Fly=false; Config.Invisibility=false
     ResetAimState()
     SetFly(false)
     Invisibility(false)
-    for _,refresh in ipairs(Refreshers) do refresh() end
-    SaveProfile(Config.ActiveProfile)
-end,C.Bad)
-Section(Pages.Settings,"PROFILES","Keep your preferred panel setup between re-executions")
-Action(Pages.Settings,"Save Profile",function()
-    return "Save the current configuration as "..tostring(Config.ActiveProfile).."."
-end,function()
-    SaveProfile(Config.ActiveProfile)
-end,C.Good)
-Action(Pages.Settings,"Load Profile",function()
-    return "Load the saved "..tostring(Config.ActiveProfile).." configuration."
-end,function()
-    if LoadProfile(Config.ActiveProfile) then
-        Env.AstriumHubLastActiveProfile=Config.ActiveProfile
-        for _,refresh in ipairs(Refreshers) do refresh() end
+    RefreshAllUI()
+    ScheduleAutoSave()
+    Notify("Features","Gameplay features reset","success")
+end,U.Bad)
+
+Section(Pages.Settings,"KEYBINDS","Every major feature gets a customizable shortcut")
+Info(Pages.Settings,"Desktop input","Keyboard + MouseButton1/2/3/4/5 are supported. Press Escape while capturing to clear a bind.",U.Accent)
+local KeybindDefs={
+    {id="Panel",label="Open / Close Panel",config="Keybind_Panel"},
+    {id="Aimbot",label="Aimbot",config="Keybind_Aimbot"},
+    {id="ESP",label="ESP",config="Keybind_ESP"},
+    {id="Speed",label="Speed",config="Keybind_Speed"},
+    {id="Fly",label="Fly",config="Keybind_Fly"},
+    {id="NoClip",label="NoClip",config="Keybind_NoClip"},
+    {id="Invisibility",label="Invisibility",config="Keybind_Invisibility"},
+    {id="ThirdPerson",label="Third Person",config="Keybind_ThirdPerson"},
+    {id="Crosshair",label="Crosshair",config="Keybind_Crosshair"},
+    {id="FullBright",label="Full Bright",config="Keybind_FullBright"},
+    {id="InfiniteJump",label="Infinite Jump",config="Keybind_InfiniteJump"},
+}
+local KeybindRows={}
+local KeybindCapture=nil
+local RefreshProfileList
+local function KeyName(input)
+    local t=input.UserInputType
+    if t==Enum.UserInputType.MouseButton1 or t==Enum.UserInputType.MouseButton2 or t==Enum.UserInputType.MouseButton3 or t==Enum.UserInputType.MouseButton4 or t==Enum.UserInputType.MouseButton5 then
+        return t.Name
     end
-end,C.Accent)
-Action(Pages.Settings,"New Profile","Switch profile name by editing ActiveProfile in the Config block, then save.",function()
-    SaveProfile(Config.ActiveProfile)
-end,C.Accent)
-Info(Pages.Settings,"Persistence","Uses file APIs when available; otherwise uses the current runtime environment.",C.Good)
-Action(Pages.Settings,"Mobile optimized","Responsive scaling, touch toggles, sliders, scrolling and drag support.",function() Resize() end,C.Good)
+    local k=input.KeyCode
+    if k and k~=Enum.KeyCode.Unknown then return k.Name end
+    return nil
+end
+local function FindBindOwner(name,exceptId)
+    if not name or name=="None" then return nil end
+    for _,def in ipairs(KeybindDefs) do
+        if def.id~=exceptId and tostring(Config[def.config])==name then return def.label end
+    end
+    return nil
+end
+local function SetKeybind(def,name)
+    name=tostring(name or "None")
+    if name=="Escape" then name="None" end
+    local owner=FindBindOwner(name,def.id)
+    if owner then
+        Notify("Keybind conflict",name.." is already assigned to "..owner,"error",3)
+        return false
+    end
+    Config[def.config]=name
+    if def.id=="Panel" then
+        local enumKey=Enum.KeyCode[name]
+        Config.PanelKey=enumKey or Enum.KeyCode.O
+    end
+    ScheduleAutoSave()
+    Notify("Keybind updated",def.label.." → "..name,"success")
+    return true
+end
+for _,def in ipairs(KeybindDefs) do
+    local row=New("Frame",{Size=UDim2.new(1,0,0,54),BackgroundColor3=U.Surface,BorderSizePixel=0},Pages.Settings); Corner(row,10); Outline(row,U.Border,1,.18)
+    New("TextLabel",{Size=UDim2.new(1,-125,0,18),Position=UDim2.fromOffset(12,7),BackgroundTransparency=1,Text=def.label,TextColor3=U.Text,TextSize=9,Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Left},row)
+    local status=New("TextLabel",{Size=UDim2.new(1,-125,0,15),Position=UDim2.fromOffset(12,28),BackgroundTransparency=1,Text="Click the bind to change it",TextColor3=U.Muted,TextSize=7,Font=Enum.Font.Gotham,TextXAlignment=Enum.TextXAlignment.Left},row)
+    local bind=New("TextButton",{Size=UDim2.fromOffset(96,32),Position=UDim2.new(1,-108,.5,-16),BackgroundColor3=U.Surface3,Text="",TextColor3=U.Text,TextSize=8,Font=Enum.Font.GothamBold,AutoButtonColor=false,BorderSizePixel=0},row); Corner(bind,9); Outline(bind,U.Border,1,.05)
+    local function refresh()
+        local key=tostring(Config[def.config] or "None")
+        bind.Text=(KeybindCapture==def) and "PRESS ANY KEY…" or key
+        local conflict=FindBindOwner(key,def.id)
+        status.Text=conflict and ("CONFLICT: "..conflict) or ((key=="None") and "Unassigned" or "Ready")
+        status.TextColor3=conflict and U.Bad or U.Muted
+        bind.BackgroundColor3=conflict and U.Bad or U.Surface3
+    end
+    bind.Activated:Connect(function()
+        KeybindCapture=def
+        refresh()
+        Notify("Keybind capture", "Press a keyboard key or mouse button", "info", 2.0)
+        task.delay(0.15,function()
+            if KeybindCapture==def then
+                -- waiting for UserInputService.InputBegan
+            end
+        end)
+    end)
+    KeybindRows[def.id]={refresh=refresh,button=bind,row=row,def=def}
+    refresh()
+end
+UserInputService.InputBegan:Connect(function(input,gameProcessed)
+    if KeybindCapture then
+        local def=KeybindCapture
+        KeybindCapture=nil
+        local name=KeyName(input)
+        if input.KeyCode==Enum.KeyCode.Escape then name="None" end
+        if name then
+            if SetKeybind(def,name) then
+                for _,entry in pairs(KeybindRows) do entry.refresh() end
+            else
+                for _,entry in pairs(KeybindRows) do entry.refresh() end
+            end
+        end
+        return
+    end
+    if gameProcessed then return end
+    if UserInputService:GetFocusedTextBox() then return end
+    local name=KeyName(input)
+    if not name then return end
+    for _,def in ipairs(KeybindDefs) do
+        if tostring(Config[def.config])==name then
+            if def.id=="Panel" then
+                if _G.__AstriumSetVisible then _G.__AstriumSetVisible(not _G.__AstriumVisible) end
+            elseif def.id=="Aimbot" then
+                Config.Aimbot=not Config.Aimbot; if not Config.Aimbot then ResetAimState() end; RefreshAllUI(); ScheduleAutoSave(); Notify("Aimbot",Config.Aimbot and "Enabled" or "Disabled",Config.Aimbot and "success" or "info")
+            elseif def.id=="ESP" then
+                Config.ESP=not Config.ESP; RefreshAllUI(); ScheduleAutoSave(); Notify("ESP",Config.ESP and "Enabled" or "Disabled",Config.ESP and "success" or "info")
+            elseif def.id=="Speed" then
+                Config.Speed=not Config.Speed; RefreshAllUI(); ScheduleAutoSave(); Notify("Speed",Config.Speed and "Enabled" or "Disabled",Config.Speed and "success" or "info")
+            elseif def.id=="Fly" then
+                Config.Fly=not Config.Fly; SetFly(Config.Fly); RefreshAllUI(); ScheduleAutoSave(); Notify("Fly",Config.Fly and "Enabled" or "Disabled",Config.Fly and "success" or "info")
+            elseif def.id=="NoClip" then
+                Config.NoClip=not Config.NoClip; RefreshAllUI(); ScheduleAutoSave(); Notify("NoClip",Config.NoClip and "Enabled" or "Disabled",Config.NoClip and "success" or "info")
+            elseif def.id=="Invisibility" then
+                Config.Invisibility=not Config.Invisibility; Invisibility(Config.Invisibility); RefreshAllUI(); ScheduleAutoSave(); Notify("Invisibility",Config.Invisibility and "Enabled" or "Disabled",Config.Invisibility and "success" or "info")
+            elseif def.id=="ThirdPerson" then
+                Config.ThirdPerson=not Config.ThirdPerson; RefreshAllUI(); ScheduleAutoSave(); Notify("Third Person",Config.ThirdPerson and "Enabled" or "Disabled",Config.ThirdPerson and "success" or "info")
+            elseif def.id=="Crosshair" then
+                Config.Crosshair=not Config.Crosshair; RefreshAllUI(); ScheduleAutoSave(); Notify("Crosshair",Config.Crosshair and "Enabled" or "Disabled",Config.Crosshair and "success" or "info")
+            elseif def.id=="FullBright" then
+                Config.FullBright=not Config.FullBright; RefreshAllUI(); ScheduleAutoSave(); Notify("Full Bright",Config.FullBright and "Enabled" or "Disabled",Config.FullBright and "success" or "info")
+            elseif def.id=="InfiniteJump" then
+                Config.InfiniteJump=not Config.InfiniteJump; RefreshAllUI(); ScheduleAutoSave(); Notify("Infinite Jump",Config.InfiniteJump and "Enabled" or "Disabled",Config.InfiniteJump and "success" or "info")
+            end
+            break
+        end
+    end
+end)
+
+Section(Pages.Settings,"PROFILES","Named presets with instant switching")
+local ProfileNameBox=New("TextBox",{Size=UDim2.new(1,-16,0,38),Position=UDim2.fromOffset(8,0),BackgroundColor3=U.Surface2,Text=Config.ActiveProfile,PlaceholderText="Profile name",PlaceholderColor3=U.Muted,TextColor3=U.Text,TextSize=9,Font=Enum.Font.Gotham,ClearTextOnFocus=false,TextXAlignment=Enum.TextXAlignment.Left,BorderSizePixel=0},Pages.Settings); Corner(ProfileNameBox,9); Outline(ProfileNameBox,U.Border,1,.1); New("UIPadding",{PaddingLeft=UDim.new(0,12)},ProfileNameBox)
+local function ProfileButton(title,callback,color)
+    return Action(Pages.Settings,title,"",function() callback() end,color or U.Accent)
+end
+ProfileButton("Save / Create Profile",function()
+    local n=(ProfileNameBox.Text:gsub("[^%w%-%_ ]","")):sub(1,28)
+    if n=="" then Notify("Profile","Enter a valid profile name","error",2.5); return end
+    Config.ActiveProfile=n; SaveProfile(n); ProfileNameBox.Text=n; RefreshProfileList(); if ProfileBadge then ProfileBadge.Text="PROFILE: "..n end; Notify("Profile saved","'"..n.."' saved","success");
+end,U.Good)
+ProfileButton("Load Profile",function()
+    local n=ProfileNameBox.Text
+    if LoadProfile(n) then
+        Config.PanelKey=Enum.KeyCode[tostring(Config.Keybind_Panel or "O")] or Enum.KeyCode.O
+        RefreshAllUI(); ProfileNameBox.Text=Config.ActiveProfile; RefreshProfileList(); if ProfileBadge then ProfileBadge.Text="PROFILE: "..Config.ActiveProfile end; ScheduleAutoSave(); Notify("Profile loaded","'"..n.."' loaded","success")
+    else Notify("Profile","'"..n.."' not found","error",2.5) end
+end,U.Accent)
+ProfileButton("Rename Profile",function()
+    local old=Config.ActiveProfile
+    local n=(ProfileNameBox.Text:gsub("[^%w%-%_ ]","")):sub(1,28)
+    if n=="" or n==old then return end
+    if Env.AstriumHubProfiles[n] then Notify("Profile","That name already exists","error",2.5); return end
+    Env.AstriumHubProfiles[n]=ConfigSnapshot()
+    Env.AstriumHubProfiles[old]=nil
+    Config.ActiveProfile=n; Env.AstriumHubLastActiveProfile=n; SaveProfilesToDisk(); ProfileNameBox.Text=n; RefreshProfileList(); if ProfileBadge then ProfileBadge.Text="PROFILE: "..n end
+    Notify("Profile renamed",old.." → "..n,"success")
+end,U.Accent)
+ProfileButton("Delete Profile",function()
+    local n=ProfileNameBox.Text
+    local names=GetProfileNames()
+    if #names<=1 then Notify("Profile","Keep at least one profile","error",2.5); return end
+    if not Env.AstriumHubProfiles[n] then Notify("Profile","'"..n.."' not found","error",2.5); return end
+    Env.AstriumHubProfiles[n]=nil
+    local nextName=GetProfileNames()[1] or "Default"
+    LoadProfile(nextName); SaveProfilesToDisk(); ProfileNameBox.Text=nextName; RefreshAllUI(); RefreshProfileList(); if ProfileBadge then ProfileBadge.Text="PROFILE: "..nextName end
+    Notify("Profile deleted","'"..n.."' removed","success")
+end,U.Bad)
+
+local ProfileList=New("ScrollingFrame",{Size=UDim2.new(1,0,0,130),BackgroundColor3=U.Surface,BorderSizePixel=0,ScrollBarThickness=3,ScrollBarImageColor3=U.Accent,AutomaticCanvasSize=Enum.AutomaticSize.Y,CanvasSize=UDim2.new()},Pages.Settings); Corner(ProfileList,11); Outline(ProfileList,U.Border,1,.18)
+New("UIListLayout",{Padding=UDim.new(0,5),SortOrder=Enum.SortOrder.LayoutOrder},ProfileList)
+RefreshProfileList=function()
+    for _,child in ipairs(ProfileList:GetChildren()) do if child:IsA("TextButton") then child:Destroy() end end
+    for i,name in ipairs(GetProfileNames()) do
+        local b=New("TextButton",{Size=UDim2.new(1,-8,0,32),BackgroundColor3=(name==Config.ActiveProfile) and U.Surface3 or U.Surface2,Text="",AutoButtonColor=false,BorderSizePixel=0,LayoutOrder=i},ProfileList); Corner(b,8)
+        New("TextLabel",{Size=UDim2.new(1,-22,1,0),Position=UDim2.fromOffset(11,0),BackgroundTransparency=1,Text=name,TextColor3=(name==Config.ActiveProfile) and U.Text or U.Sub,TextSize=8,Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Left},b)
+        b.Activated:Connect(function()
+            ProfileNameBox.Text=name
+            if LoadProfile(name) then Config.PanelKey=Enum.KeyCode[tostring(Config.Keybind_Panel or "O")] or Enum.KeyCode.O; RefreshAllUI(); RefreshProfileList(); if ProfileBadge then ProfileBadge.Text="PROFILE: "..name end; Notify("Profile switched","'"..name.."' active","success") end
+        end)
+    end
+end
+RefreshProfileList()
+Info(Pages.Settings,"Auto-save","Every toggle, slider commit and keybind change is automatically saved with a debounced disk write.",U.Good)
+
+Section(Pages.Settings,"IMPORT / EXPORT","Portable JSON profile strings")
+local ExportBox=New("TextBox",{Size=UDim2.new(1,0,0,74),BackgroundColor3=U.Surface2,Text="",PlaceholderText="Export JSON appears here…",PlaceholderColor3=U.Muted,TextColor3=U.Sub,TextSize=7,Font=Enum.Font.Code,TextWrapped=true,TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Top,MultiLine=true,ClearTextOnFocus=false,BorderSizePixel=0},Pages.Settings); Corner(ExportBox,9); Outline(ExportBox,U.Border,1,.1); New("UIPadding",{PaddingLeft=UDim.new(0,10),PaddingTop=UDim.new(0,8),PaddingRight=UDim.new(0,8)},ExportBox)
+local ImportBox=New("TextBox",{Size=UDim2.new(1,0,0,74),BackgroundColor3=U.Surface2,Text="",PlaceholderText="Paste profile JSON here…",PlaceholderColor3=U.Muted,TextColor3=U.Text,TextSize=7,Font=Enum.Font.Code,TextWrapped=true,TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Top,MultiLine=true,ClearTextOnFocus=false,BorderSizePixel=0},Pages.Settings); Corner(ImportBox,9); Outline(ImportBox,U.Border,1,.1); New("UIPadding",{PaddingLeft=UDim.new(0,10),PaddingTop=UDim.new(0,8),PaddingRight=UDim.new(0,8)},ImportBox)
+ProfileButton("Export Current Profile",function()
+    local encoded=HttpService:JSONEncode({version=1,name=Config.ActiveProfile,config=ConfigSnapshot()})
+    ExportBox.Text=encoded
+    pcall(function() if type(setclipboard)=="function" then setclipboard(encoded) end end)
+    Notify("Profile exported","JSON copied when clipboard API is available","success")
+end,U.Accent)
+ProfileButton("Import Profile",function()
+    local raw=ImportBox.Text or ""
+    if raw=="" then Notify("Import","Paste JSON first","error",2.3); return end
+    local ok,data=pcall(function() return HttpService:JSONDecode(raw) end)
+    if not ok or type(data)~="table" then Notify("Import","Invalid JSON","error",2.8); return end
+    local snapshot=(type(data.config)=="table" and data.config) or data
+    ApplySnapshot(snapshot)
+    local n=(type(data.name)=="string" and data.name~="" and data.name or Config.ActiveProfile)
+    n=(n:gsub("[^%w%-%_ ]","")):sub(1,28)
+    if n=="" then n="Default" end
+    Config.ActiveProfile=n
+    SaveProfile(n)
+    Config.PanelKey=Enum.KeyCode[tostring(Config.Keybind_Panel or "O")] or Enum.KeyCode.O
+    RefreshAllUI(); ProfileNameBox.Text=n; RefreshProfileList()
+    Notify("Profile imported","'"..n.."' applied","success")
+end,U.Good)
+
+Section(Pages.Settings,"MOBILE EXPERIENCE","Touch-first controls with no required keyboard input")
+Info(Pages.Settings,"Touch ready","All toggles, sliders, tabs, search, profiles and draggable panel controls remain usable without keyboard shortcuts.",U.Good)
 
 --========================================================
 -- ADDITIONAL CLIENT FEATURES
@@ -701,7 +1039,7 @@ Toggle(Pages.Combat,"Sticky Aim","Keeps the selected target while it remains val
 Toggle(Pages.Combat,"Prediction","Uses target velocity for a small local lead.",function() return Config.AimPrediction end,function(v) Config.AimPrediction=v end)
 Slider(Pages.Combat,"Prediction","Prediction amount.",0,0.30,0.01,function() return Config.AimPredictionAmount end,function(v) Config.AimPredictionAmount=v end)
 Slider(Pages.Combat,"Deadzone","Ignore tiny aim corrections.",0,30,1,function() return Config.AimDeadzone end,function(v) Config.AimDeadzone=v end)
-Info(Pages.Combat,"Smoothness fixed","Smoothing is now frame-rate independent.",C.Good)
+Info(Pages.Combat,"Smoothness fixed","Smoothing is now frame-rate independent.",U.Good)
 
 Section(Pages.Movement,"MOVEMENT EXTRAS","More local quality-of-life controls")
 Toggle(Pages.Movement,"Auto Sprint","Marks the client as sprint-ready while moving.",function() return Config.AutoSprint end,function(v) Config.AutoSprint=v end)
@@ -716,7 +1054,7 @@ Section(Pages.Camera,"CAMERA","Dedicated camera controls")
 Slider(Pages.Camera,"Field of View","Local camera FOV.",40,120,1,function() return Config.FOV end,function(v) Config.FOV=v end)
 Toggle(Pages.Camera,"Third Person","Use a local third-person view.",function() return Config.ThirdPerson end,function(v) Config.ThirdPerson=v end)
 Toggle(Pages.Camera,"Camera Bob","Add subtle movement bob.",function() return Config.CameraBob end,function(v) Config.CameraBob=v end)
-Info(Pages.Camera,"Smooth aim","Uses frame-rate independent interpolation.",C.Good)
+Info(Pages.Camera,"Smooth aim","Uses frame-rate independent interpolation.",U.Good)
 
 Section(Pages.Interface,"CROSSHAIR","Local reticle and HUD")
 Toggle(Pages.Interface,"Crosshair","Show a custom local crosshair.",function() return Config.Crosshair end,function(v) Config.Crosshair=v end)
@@ -740,7 +1078,7 @@ Slider(Pages.Graphics,"Color Boost","Local brightness boost.",-0.5,0.5,0.05,func
 Section(Pages.Utility,"UTILITY","Small client-only quality-of-life tools")
 Toggle(Pages.Utility,"Infinite Jump","Allow repeated local jump requests.",function() return Config.InfiniteJump end,function(v) Config.InfiniteJump=v end)
 Toggle(Pages.Utility,"Auto Sprint","Keep the player sprint-ready locally.",function() return Config.AutoSprint end,function(v) Config.AutoSprint=v end)
-Info(Pages.Utility,"Client-only","These controls are designed for local presentation and convenience.",C.Accent)
+Info(Pages.Utility,"Client-only","These controls are designed for local presentation and convenience.",U.Accent)
 
 SelectTab("Combat")
 
@@ -749,29 +1087,25 @@ SelectTab("Combat")
 --========================================================
 local visible=true
 local openPos=Main.Position
-local closedPos=UDim2.new(openPos.X.Scale,openPos.X.Offset,openPos.Y.Scale,openPos.Y.Offset+14)
+local closedPos=UDim2.new(openPos.X.Scale,openPos.X.Offset,openPos.Y.Scale,openPos.Y.Offset+18)
 local function SetVisible(v)
     visible=v
+    _G.__AstriumVisible=v
     if v then
         Main.Visible=true; Main.Position=closedPos; Main.BackgroundTransparency=1
         T(Main,{Position=openPos,BackgroundTransparency=0},.19)
-        OpenLabel.Text="ASTRIUM  •  [O]"; Dot.BackgroundColor3=C.Good
+        OpenLabel.Text="ASTRIUM  •  [O]"; Dot.BackgroundColor3=U.Good
     else
         local tw=TweenService:Create(Main,TweenInfo.new(.15,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{Position=closedPos,BackgroundTransparency=1})
         tw.Completed:Connect(function() if not visible then Main.Visible=false end end); tw:Play()
-        OpenLabel.Text="ASTRIUM  •  [O]"; Dot.BackgroundColor3=C.Accent
+        OpenLabel.Text="ASTRIUM  •  [O]"; Dot.BackgroundColor3=U.Accent
     end
 end
+_G.__AstriumSetVisible=SetVisible
 Open.Activated:Connect(function() SetVisible(not visible) end)
 Close.Activated:Connect(function() SetVisible(false) end)
-Open.MouseEnter:Connect(function() T(Open,{BackgroundColor3=C.Surface2},.1) end); Open.MouseLeave:Connect(function() T(Open,{BackgroundColor3=C.Surface},.1) end)
-Close.MouseEnter:Connect(function() T(Close,{BackgroundColor3=C.Bad,TextColor3=Color3.new(1,1,1)},.1) end); Close.MouseLeave:Connect(function() T(Close,{BackgroundColor3=C.Surface3,TextColor3=C.Sub},.1) end)
-
--- ONLY hotkey: O
-ContextActionService:BindActionAtPriority("AstriumHub_OpenClose",function(_,state)
-    if state==Enum.UserInputState.Begin then SetVisible(not visible) end
-    return Enum.ContextActionResult.Sink
-end,false,Enum.ContextActionPriority.High.Value,Config.PanelKey)
+Open.MouseEnter:Connect(function() T(Open,{BackgroundColor3=U.Surface2},.1) end); Open.MouseLeave:Connect(function() T(Open,{BackgroundColor3=U.Surface},.1) end)
+Close.MouseEnter:Connect(function() T(Close,{BackgroundColor3=U.Bad,TextColor3=Color3.new(1,1,1)},.1) end); Close.MouseLeave:Connect(function() T(Close,{BackgroundColor3=U.Surface3,TextColor3=U.Sub},.1) end)
 
 --========================================================
 -- CLIENT HUD
@@ -782,7 +1116,7 @@ local ESPOverlay=New("Frame",{Name="ESPOverlay",Size=UDim2.fromScale(1,1),Backgr
 local Crosshair=New("Frame",{Name="Crosshair",Size=UDim2.fromOffset(1,1),Position=UDim2.fromScale(.5,.5),AnchorPoint=Vector2.new(.5,.5),BackgroundTransparency=1},ClientHUD)
 local ChTop=New("Frame",{BackgroundColor3=Color3.new(1,1,1),BorderSizePixel=0},Crosshair); local ChBottom=New("Frame",{BackgroundColor3=Color3.new(1,1,1),BorderSizePixel=0},Crosshair)
 local ChLeft=New("Frame",{BackgroundColor3=Color3.new(1,1,1),BorderSizePixel=0},Crosshair); local ChRight=New("Frame",{BackgroundColor3=Color3.new(1,1,1),BorderSizePixel=0},Crosshair)
-local Status=New("TextLabel",{Size=UDim2.fromOffset(210,58),Position=UDim2.new(1,-225,0,14),BackgroundTransparency=.35,BackgroundColor3=C.Surface,TextColor3=C.Text,TextSize=10,Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Top,TextWrapped=true,Text=""},ClientHUD); Corner(Status,10); Outline(Status,C.Border)
+local Status=New("TextLabel",{Size=UDim2.fromOffset(220,62),Position=UDim2.new(1,-235,0,14),BackgroundTransparency=.22,BackgroundColor3=U.Surface,TextColor3=U.Text,TextSize=10,Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Top,TextWrapped=true,Text=""},ClientHUD); Corner(Status,10); Outline(Status,U.Border)
 New("UIPadding",{PaddingLeft=UDim.new(0,10),PaddingTop=UDim.new(0,7),PaddingRight=UDim.new(0,6)},Status)
 
 local function UpdateCrosshair()
@@ -2139,8 +2473,16 @@ RunService:BindToRenderStep(MAIN_RENDER_NAME,Enum.RenderPriority.Character.Value
     end
 end)
 
-print("ASTRIUM HUB loaded | Only hotkey: O | Premium UI")
+task.defer(function()
+    if ProfileBadge then ProfileBadge.Text="PROFILE: "..tostring(Config.ActiveProfile) end
+    Notify("ASTRIUM HUB","Premium systems initialized","success",2.0)
+end)
+
+print("ASTRIUM HUB loaded | Premium keybinds + profiles + search + toasts")
 
 -- Remember the active profile for the next execution in the same environment.
 Env.AstriumHubLastActiveProfile = Config.ActiveProfile
-SaveProfile(Config.ActiveProfile)
+local panelkey = Enum.KeyCode[tostring(Config.Keybind_Panel or "O")] or Enum.KeyCode.O
+Config.PanelKey = panelkey
+pcall(function() SaveProfile(Config.ActiveProfile) end)
+if ProfileBadge then ProfileBadge.Text="PROFILE: "..tostring(Config.ActiveProfile) end
